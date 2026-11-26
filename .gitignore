@@ -1,0 +1,11 @@
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+dist/
+uv.lock
+# Never commit credentials or tokens
+client.json
+token.json
+config.yaml
+.linkedin-ads/
