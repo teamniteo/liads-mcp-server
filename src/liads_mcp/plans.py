@@ -28,6 +28,8 @@ class Plan:
     preview: dict
     ops: list[dict]
     created_at: float = field(default_factory=time.time)
+    # ids returned by the operations applied so far; a failed apply resumes after them
+    progress: list = field(default_factory=list)
 
 
 class PlanStore:
@@ -58,6 +60,11 @@ class PlanStore:
         if plan_id not in data:
             raise KeyError(f"unknown or expired plan {plan_id}")
         return Plan(**data[plan_id])
+
+    def update(self, plan: Plan) -> None:
+        data = self._load()
+        data[plan.id] = asdict(plan)
+        self._save(data)
 
     def remove(self, plan_id: str) -> None:
         data = self._load()

@@ -75,7 +75,7 @@ def test_get_is_retried(service, api, monkeypatch):
     monkeypatch.setattr("liads_mcp.client.time.sleep", lambda s: None)
     route = api.get(f"{API}/adAccounts/{ACCOUNT}/adCampaignGroups")
     route.side_effect = [httpx.Response(503), httpx.Response(200, json={"elements": [{"id": 1}]})]
-    assert service.list_campaign_groups(ACCOUNT) == [{"id": 1}]
+    assert service.list_campaign_groups(ACCOUNT)["elements"] == [{"id": 1}]
     assert route.call_count == 2
 
 
@@ -88,6 +88,7 @@ def test_errors_do_not_leak_token(service, api):
 
 def _live(**over):
     c = {"id": 7001, "name": "c", "status": "DRAFT", "audienceExpansionEnabled": False, "offsiteDeliveryEnabled": False,
+         "costType": "CPC", "locale": {"country": "GB", "language": "en"},
          "dailyBudget": {"amount": "14.80", "currencyCode": "GBP"}, "totalBudget": {"amount": "1350", "currencyCode": "GBP"},
          "unitCost": {"amount": "6", "currencyCode": "GBP"}, "runSchedule": {"start": 1796688000000, "end": 1803945600000}}
     c.update(over)
@@ -184,7 +185,7 @@ def test_conversion_upload_hashes_and_skips(service, api, cfg):
     batch = api.post(f"{API}/conversionEvents").respond(201, json={"elements": [{"status": 201}]})
     plan = service.draft_conversion_upload(ACCOUNT, 88, str(csv_file))
     assert plan["preview"]["events"] == 1
-    assert plan["preview"]["skipped"] == {"no id": 1, "older than 90 days": 1, "bad date": 0}
+    assert plan["preview"]["skipped"] == {"no id": 1, "older than 90 days": 1, "bad date": 0, "bad value": 0}
     service.confirm_and_apply([plan["plan_id"]], dry_run=False)
     req = batch.calls[0].request
     assert req.headers["X-RestLi-Method"] == "BATCH_CREATE"

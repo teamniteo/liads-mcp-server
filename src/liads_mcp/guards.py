@@ -123,7 +123,9 @@ def check_post(body: dict) -> None:
         raise GuardError("ad posts need adContext (direct sponsored content)")
 
 
-def check_patch(cfg: Config, entity: str, fields: dict, currency: str) -> None:
+def check_patch(cfg: Config, entity: str, fields: dict, currency: str, current: dict | None = None) -> None:
+    """current: the entity's present dailyBudget/totalBudget, so a one-sided change is checked
+    against the other budget."""
     allowed = {"campaign": CAMPAIGN_PATCH_KEYS, "group": GROUP_PATCH_KEYS, "creative": CREATIVE_PATCH_KEYS}[entity]
     extra = set(fields) - allowed
     if extra:
@@ -132,7 +134,11 @@ def check_patch(cfg: Config, entity: str, fields: dict, currency: str) -> None:
     if status and status != "PAUSED":
         raise GuardError("updates can only pause; going live is an enable plan")
     if entity == "campaign":
-        _check_budgets(cfg, fields.get("dailyBudget"), fields.get("totalBudget"), currency)
+        current = current or {}
+        daily = fields.get("dailyBudget", current.get("dailyBudget"))
+        total = fields.get("totalBudget", current.get("totalBudget"))
+        if "dailyBudget" in fields or "totalBudget" in fields:
+            _check_budgets(cfg, daily, total, currency)
         if "unitCost" in fields:
             _check_bid(cfg, fields["unitCost"], currency)
         if "runSchedule" in fields:
@@ -147,12 +153,25 @@ def check_live_campaign(cfg: Config, campaign: dict, currency: str) -> None:
         raise GuardError("campaign has audience expansion on; turn it off before enabling")
     if campaign.get("offsiteDeliveryEnabled"):
         raise GuardError("campaign has the LinkedIn Audience Network on; turn it off before enabling")
+    if campaign.get("costType") != "CPC":
+        raise GuardError(f"campaign bids {campaign.get('costType')}, not manual CPC; change it before enabling")
+    if not campaign.get("locale", {}).get("country") or not campaign.get("locale", {}).get("language"):
+        raise GuardError("campaign has no locale")
     _check_budgets(cfg, campaign.get("dailyBudget"), campaign.get("totalBudget"), currency)
     if campaign.get("totalBudget") is None:
         raise GuardError("campaign has no lifetime budget")
+    _check_bid(cfg, campaign.get("unitCost"), currency)
     end = campaign.get("runSchedule", {}).get("end")
     if not end:
         raise GuardError("campaign has no end date")
+
+
+def check_live_group(cfg: Config, group: dict, currency: str) -> None:
+    """Before switching a campaign group on."""
+    if group.get("totalBudget") is not None:
+        _check_budgets(cfg, None, group["totalBudget"], currency)
+    if not group.get("runSchedule", {}).get("end"):
+        raise GuardError("campaign group has no end date")
 
 
 def safe_file(cfg: Config, path: str, kind: str) -> Path:
@@ -177,11 +196,16 @@ def safe_file(cfg: Config, path: str, kind: str) -> Path:
 
 
 def ms(day: str) -> int:
-    """'2026-12-08' -> epoch milliseconds (UTC midnight)."""
+    """'2026-12-08' -> epoch milliseconds at the start of that day (UTC)."""
     y, m, d = (int(x) for x in day.split("-"))
     from datetime import datetime, timezone
 
     return int(datetime(y, m, d, tzinfo=timezone.utc).timestamp() * 1000)
+
+
+def ms_end(day: str) -> int:
+    """'2027-02-28' -> the last millisecond of that day (UTC), so the end day still runs."""
+    return ms(day) + 86_400_000 - 1
 
 
 def today() -> date:

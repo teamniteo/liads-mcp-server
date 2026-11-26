@@ -6,7 +6,10 @@ from __future__ import annotations
 import functools
 from typing import Annotated
 
+import anyio
+import httpx
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from .client import LinkedInError
@@ -46,13 +49,20 @@ def svc() -> Service:
     return _service
 
 
+EXPECTED = (GuardError, LinkedInError, KeyError, ValueError, RuntimeError, OSError, ArithmeticError,
+            IndexError, httpx.HTTPError)
+
+
 def safe(fn):
+    """Run the (blocking) tool in a worker thread and turn expected failures into tool errors,
+    so the client sees the message instead of an output-schema mismatch."""
+
     @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
+    async def wrapper(*args, **kwargs):
         try:
-            return fn(*args, **kwargs)
-        except (GuardError, LinkedInError, KeyError, ValueError, RuntimeError, OSError) as exc:
-            return {"error": str(exc)}
+            return await anyio.to_thread.run_sync(functools.partial(fn, *args, **kwargs))
+        except EXPECTED as exc:
+            raise ToolError(str(exc)) from exc
 
     return wrapper
 
@@ -66,8 +76,9 @@ def health_check() -> dict:
 
 @mcp.tool(annotations=READ)
 @safe
-def list_ad_accounts() -> list[dict]:
-    """Ad accounts the signed-in user can see, with currency and whether writes are allowed."""
+def list_ad_accounts() -> dict:
+    """Ad accounts the signed-in user can see, with currency and whether writes are allowed.
+    Lists return {elements, count, truncated}; truncated means more than 1,000 exist."""
     return svc().list_ad_accounts()
 
 
@@ -80,21 +91,21 @@ def get_ad_account(account_id: int) -> dict:
 
 @mcp.tool(annotations=READ)
 @safe
-def list_campaign_groups(account_id: int) -> list[dict]:
+def list_campaign_groups(account_id: int) -> dict:
     """Campaign groups in an ad account."""
     return svc().list_campaign_groups(account_id)
 
 
 @mcp.tool(annotations=READ)
 @safe
-def list_campaigns(account_id: int, group_id: int | None = None) -> list[dict]:
+def list_campaigns(account_id: int, group_id: int | None = None) -> dict:
     """Campaigns in an ad account, optionally in one campaign group."""
     return svc().list_campaigns(account_id, group_id)
 
 
 @mcp.tool(annotations=READ)
 @safe
-def list_creatives(account_id: int, campaign_id: int | None = None) -> list[dict]:
+def list_creatives(account_id: int, campaign_id: int | None = None) -> dict:
     """Ads (creatives) in an ad account, optionally for one campaign."""
     return svc().list_creatives(account_id, campaign_id)
 
@@ -138,7 +149,7 @@ def get_analytics(
 
 @mcp.tool(annotations=READ)
 @safe
-def list_conversions(account_id: int) -> list[dict]:
+def list_conversions(account_id: int) -> dict:
     """Conversion rules in an ad account."""
     return svc().list_conversions(account_id)
 

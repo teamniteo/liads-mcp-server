@@ -5,12 +5,12 @@ from __future__ import annotations
 import csv
 import hashlib
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from urllib.parse import quote, urlparse
 
 from . import guards, restli
 from .auth import TokenStore
-from .client import Client
+from .client import Client, LinkedInError
 from .config import Config
 from .plans import SOLO_KINDS, Plan, PlanStore, audit, resolve_refs
 from .versions import version_status
@@ -38,6 +38,7 @@ ANALYTICS_FIELDS = [
 INTRO_VISIBLE = 150
 CONVERSION_BATCH = 5000
 CONVERSION_MAX_AGE_DAYS = 90
+LIST_LIMIT = 1000
 
 
 def _num(entity_id) -> str:
@@ -53,6 +54,13 @@ def _facet(name: str) -> str:
     return name if name.startswith("urn:") else FACET_URN + name
 
 
+def exclusion(exclude: list[dict]) -> dict:
+    ors: dict = {}
+    for f in exclude:
+        ors.setdefault(_facet(f["facet"]), []).extend(f["values"])
+    return {"or": ors}
+
+
 def targeting(include: list[dict], exclude: list[dict] | None = None) -> dict:
     """include: [{"facet": "locations", "values": [urn, ...]}, ...] (facets AND-ed, values OR-ed);
     exclude: same shape, all OR-ed."""
@@ -60,10 +68,7 @@ def targeting(include: list[dict], exclude: list[dict] | None = None) -> dict:
         raise guards.GuardError("targeting needs at least one include facet")
     criteria = {"include": {"and": [{"or": {_facet(f["facet"]): list(f["values"])}} for f in include]}}
     if exclude:
-        ors: dict = {}
-        for f in exclude:
-            ors.setdefault(_facet(f["facet"]), []).extend(f["values"])
-        criteria["exclude"] = {"or": ors}
+        criteria["exclude"] = exclusion(exclude)
     return criteria
 
 
@@ -88,40 +93,51 @@ class Service:
             "pending_plans": self.plans.list(),
         }
 
-    def list_ad_accounts(self) -> list[dict]:
-        data = self.client.get("/adAccounts", restli.query({"q": "search", "pageSize": 100}))
-        return [
+    def _paged(self, path: str, params: dict) -> dict:
+        """Follow nextPageToken up to LIST_LIMIT items; says when it stopped early."""
+        items, token = [], None
+        while True:
+            q = dict(params, pageSize=100, **({"pageToken": token} if token else {}))
+            data = self.client.get(path, restli.query(q))
+            items.extend(data.get("elements", []))
+            token = (data.get("metadata") or {}).get("nextPageToken")
+            if not token or len(items) >= LIST_LIMIT:
+                break
+        return {"elements": items[:LIST_LIMIT], "count": min(len(items), LIST_LIMIT),
+                "truncated": bool(token) or len(items) > LIST_LIMIT}
+
+    def list_ad_accounts(self) -> dict:
+        page = self._paged("/adAccounts", {"q": "search"})
+        page["elements"] = [
             {
                 "id": a.get("id"), "name": a.get("name"), "currency": a.get("currency"), "status": a.get("status"),
                 "type": a.get("type"), "reference": a.get("reference"),
                 "allowed": a.get("id") in self.cfg.ads.allowed_accounts,
             }
-            for a in data.get("elements", [])
+            for a in page["elements"]
         ]
+        return page
 
     def get_ad_account(self, account_id: int) -> dict:
         return self.client.get(f"/adAccounts/{int(account_id)}")
 
-    def list_campaign_groups(self, account_id: int) -> list[dict]:
-        data = self.client.get(f"/adAccounts/{int(account_id)}/adCampaignGroups", restli.query({"q": "search", "pageSize": 100}))
-        return data.get("elements", [])
+    def list_campaign_groups(self, account_id: int) -> dict:
+        return self._paged(f"/adAccounts/{int(account_id)}/adCampaignGroups", {"q": "search"})
 
-    def list_campaigns(self, account_id: int, group_id: int | None = None) -> list[dict]:
-        params: dict = {"q": "search", "pageSize": 100}
+    def list_campaigns(self, account_id: int, group_id: int | None = None) -> dict:
+        params: dict = {"q": "search"}
         if group_id:
             params["search"] = {"campaignGroup": {"values": [GROUP_URN + _num(group_id)]}}
-        data = self.client.get(f"/adAccounts/{int(account_id)}/adCampaigns", restli.query(params))
-        return data.get("elements", [])
+        return self._paged(f"/adAccounts/{int(account_id)}/adCampaigns", params)
 
     def get_campaign(self, account_id: int, campaign_id) -> dict:
         return self.client.get(f"/adAccounts/{int(account_id)}/adCampaigns/{_num(campaign_id)}")
 
-    def list_creatives(self, account_id: int, campaign_id: int | None = None) -> list[dict]:
-        params: dict = {"q": "criteria", "pageSize": 100}
+    def list_creatives(self, account_id: int, campaign_id: int | None = None) -> dict:
+        params: dict = {"q": "criteria"}
         if campaign_id:
             params["campaigns"] = [CAMPAIGN_URN + _num(campaign_id)]
-        data = self.client.get(f"/adAccounts/{int(account_id)}/creatives", restli.query(params))
-        return data.get("elements", [])
+        return self._paged(f"/adAccounts/{int(account_id)}/creatives", params)
 
     def get_targeting_facets(self) -> list[dict]:
         return self.client.get("/adTargetingFacets").get("elements", [])
@@ -136,7 +152,9 @@ class Service:
         data = self.client.get(
             "/audienceCounts", restli.query({"q": "targetingCriteriaV2", "targetingCriteria": targeting(include, exclude)})
         )
-        elements = data.get("elements", [{}])
+        elements = data.get("elements") or []
+        if not elements:
+            return {"total": None, "active": None, "note": "LinkedIn returned no estimate for this targeting"}
         return {"total": elements[0].get("total"), "active": elements[0].get("active")}
 
     def get_analytics(self, account_id: int, start: str, end: str, pivot: str = "CAMPAIGN",
@@ -155,9 +173,8 @@ class Service:
         query = restli.query({k: v for k, v in params.items() if k != "fields"}) + "&fields=" + params["fields"]
         return self.client.get("/adAnalytics", query).get("elements", [])
 
-    def list_conversions(self, account_id: int) -> list[dict]:
-        data = self.client.get("/conversions", restli.query({"q": "account", "account": ACCOUNT_URN + str(int(account_id))}))
-        return data.get("elements", [])
+    def list_conversions(self, account_id: int) -> dict:
+        return self._paged("/conversions", {"q": "account", "account": ACCOUNT_URN + str(int(account_id))})
 
     # ---------- drafts ----------
 
@@ -183,7 +200,7 @@ class Service:
             raise guards.GuardError(f"objective must be one of {sorted(OBJECTIVES)}")
         if bool(group_id) == bool(new_group_name):
             raise guards.GuardError("give either group_id or new_group_name")
-        schedule = {"start": guards.ms(start), "end": guards.ms(end)}
+        schedule = {"start": guards.ms(start), "end": guards.ms_end(end)}
         ops: list[dict] = []
         if new_group_name:
             group = {
@@ -244,14 +261,28 @@ class Service:
             fields["unitCost"] = _money(bid, cur)
             rise |= higher("unitCost", bid)
         if end:
-            fields["runSchedule"] = {"start": current.get("runSchedule", {}).get("start"), "end": guards.ms(end)}
-        if include:
-            fields["targetingCriteria"] = targeting(include, exclude)
+            fields["runSchedule"] = {"start": current.get("runSchedule", {}).get("start"), "end": guards.ms_end(end)}
+        if include is not None or exclude is not None:
+            # Keep the part of the targeting that isn't being changed, so exclusions aren't dropped.
+            old = current.get("targetingCriteria") or {}
+            if include is not None:
+                new = targeting(include, exclude)
+                if exclude is None and old.get("exclude"):
+                    new["exclude"] = old["exclude"]
+            else:
+                if not old.get("include"):
+                    raise guards.GuardError("campaign has no include targeting to keep")
+                new = {"include": old["include"]}
+                if exclude:
+                    new["exclude"] = exclusion(exclude)
+            fields["targetingCriteria"] = new
         if not fields:
             raise guards.GuardError("nothing to change")
-        guards.check_patch(self.cfg, "campaign", fields, cur)
+        budgets = {k: current.get(k) for k in ("dailyBudget", "totalBudget") if current.get(k)}
+        guards.check_patch(self.cfg, "campaign", fields, cur, budgets)
         ops = [{"op": "patch", "check": "campaign", "label": f"update campaign {_num(campaign_id)}",
-                "path": f"/adAccounts/{int(account_id)}/adCampaigns/{_num(campaign_id)}", "fields": fields}]
+                "path": f"/adAccounts/{int(account_id)}/adCampaigns/{_num(campaign_id)}", "fields": fields,
+                "current": budgets}]
         preview = {"campaign": f"{current.get('name')} ({_num(campaign_id)})",
                    "changes": {k: {"from": current.get(k), "to": v} for k, v in fields.items()}}
         kind = "budget_rise" if rise else "change"
@@ -335,9 +366,11 @@ class Service:
         acct = self._account(account_id)
         cur = acct["currency"]
         preview: dict = {"entity": entity, "id": str(entity_id), "to": "ACTIVE"}
+        op = {"op": "enable", "entity": entity, "id": str(entity_id), "label": f"enable {entity} {entity_id}",
+              "path": self._entity_path(account_id, entity, entity_id)}
+        live = self._live_check(int(account_id), cur, op)
         if entity == "campaign":
-            current = self.get_campaign(account_id, entity_id)
-            guards.check_live_campaign(self.cfg, current, cur)
+            current = live
             preview.update({
                 "campaign": current.get("name"),
                 "budget": f"{current.get('dailyBudget', {}).get('amount')} {cur}/day, "
@@ -345,9 +378,29 @@ class Service:
                 "ends": datetime.fromtimestamp(current["runSchedule"]["end"] / 1000, timezone.utc).date().isoformat(),
                 "note": "Spends only once the ad account has a payment method and the campaign has an active ad",
             })
-        ops = [{"op": "enable", "entity": entity, "id": str(entity_id), "label": f"enable {entity} {entity_id}",
-                "path": self._entity_path(account_id, entity, entity_id)}]
-        return self._plan("enable", account_id, cur, f"Switch on {entity} {entity_id}", preview, ops)
+        elif entity == "creative":
+            preview["campaign"] = live.get("name")
+        return self._plan("enable", account_id, cur, f"Switch on {entity} {entity_id}", preview, [op])
+
+    def _live_check(self, account_id: int, currency: str, op: dict) -> dict:
+        """Read the entity as it is now in LinkedIn and check it may go live; returns the campaign
+        (for campaigns and creatives) or the group."""
+        entity = op["entity"]
+        if entity == "campaign":
+            campaign = self.get_campaign(account_id, op["id"])
+            guards.check_live_campaign(self.cfg, campaign, currency)
+            return campaign
+        if entity == "group":
+            group = self.client.get(op["path"])
+            guards.check_live_group(self.cfg, group, currency)
+            return group
+        creative = self.client.get(op["path"])
+        campaign_urn = creative.get("campaign")
+        if not campaign_urn:
+            raise guards.GuardError("creative has no campaign")
+        campaign = self.get_campaign(account_id, campaign_urn)
+        guards.check_live_campaign(self.cfg, campaign, currency)
+        return campaign
 
     def draft_conversion(self, account_id: int, name: str, conversion_type: str = "LEAD",
                          campaign_ids: list | None = None, post_click_days: int = 30, view_days: int = 7) -> dict:
@@ -372,8 +425,8 @@ class Service:
         cur = acct["currency"]
         path = guards.safe_file(self.cfg, csv_path, "csv")
         cutoff = datetime.now(timezone.utc) - timedelta(days=CONVERSION_MAX_AGE_DAYS)
-        elements, skipped = [], {"no id": 0, "older than 90 days": 0, "bad date": 0}
-        with path.open(newline="", encoding="utf-8") as fh:
+        elements, skipped = [], {"no id": 0, "older than 90 days": 0, "bad date": 0, "bad value": 0}
+        with path.open(newline="", encoding="utf-8-sig") as fh:  # -sig: Excel byte-order mark
             for row in csv.DictReader(fh):
                 email = (row.get("email") or "").strip().lower()
                 fat = (row.get("li_fat_id") or "").strip()
@@ -395,10 +448,20 @@ class Service:
                     ids.append({"idType": "SHA256_EMAIL", "idValue": hashlib.sha256(email.encode()).hexdigest()})
                 if fat:
                     ids.append({"idType": "LINKEDIN_FIRST_PARTY_ADS_TRACKING_UUID", "idValue": fat})
+                raw_value = (row.get("value") or "").strip()
+                value = None
+                if raw_value:
+                    try:
+                        value = Decimal(raw_value)
+                    except InvalidOperation:
+                        value = None
+                    if value is None or value < 0:
+                        skipped["bad value"] += 1
+                        continue
                 el = {"conversion": CONVERSION_URN + _num(conversion_id),
                       "conversionHappenedAt": int(when.timestamp() * 1000), "user": {"userIds": ids}}
-                if row.get("value"):
-                    el["conversionValue"] = {"currencyCode": cur, "amount": str(Decimal(row["value"]))}
+                if value is not None:
+                    el["conversionValue"] = {"currencyCode": cur, "amount": str(value)}
                 if row.get("event_id"):
                     el["eventId"] = row["event_id"].strip()
                 elements.append(el)
@@ -425,9 +488,11 @@ class Service:
             elif check == "post":
                 guards.check_post(body)
         elif op["op"] == "patch":
-            guards.check_patch(self.cfg, check, op["fields"], cur)
+            guards.check_patch(self.cfg, check, op["fields"], cur, op.get("current"))
         elif op["op"] == "image_upload":
             guards.safe_file(self.cfg, op["file"], "image")
+        elif op["op"] == "enable":
+            self._live_check(plan.account_id, cur, op)
 
     def _run(self, plan: Plan, op: dict, results: list) -> dict:
         kind = op["op"]
@@ -453,49 +518,68 @@ class Service:
             return {"id": None}
         if kind == "batch_create":
             out = self.client.batch_create(op["path"], op["elements"])
-            failed = [e for e in out.get("elements", []) if e.get("status", 201) >= 400]
-            return {"id": None, "sent": len(op["elements"]), "failed": len(failed)}
+            statuses = [e.get("status", 201) for e in out.get("elements", [])]
+            failed = sum(1 for st in statuses if st >= 400)
+            if statuses and failed == len(statuses):
+                raise LinkedInError(statuses[0], f"LinkedIn rejected all {failed} events in this batch")
+            return {"id": None, "sent": len(op["elements"]), "failed": failed}
         if kind == "enable":
-            if op["entity"] == "campaign":
-                current = self.get_campaign(plan.account_id, op["id"])
-                guards.check_live_campaign(self.cfg, current, plan.currency)
+            self._live_check(plan.account_id, plan.currency, op)  # as it is right now, just before the write
             field = "intendedStatus" if op["entity"] == "creative" else "status"
             self.client.partial_update(op["path"], {field: "ACTIVE"})
             return {"id": None}
         raise ValueError(f"unknown operation {kind}")
 
     def confirm_and_apply(self, plan_ids: list[str], dry_run: bool = True) -> dict:
+        if len(set(plan_ids)) != len(plan_ids):
+            raise guards.GuardError("a plan_id is listed more than once")
         plans = [self.plans.get(pid) for pid in plan_ids]
         if len(plans) > 1 and any(p.kind in SOLO_KINDS for p in plans):
             raise guards.GuardError("switching on and budget rises are applied one plan at a time")
         report = []
         for plan in plans:
-            guards.check_account(self.cfg, plan.account_id)
-            acct = self.get_ad_account(plan.account_id)
-            if acct.get("currency") != plan.currency:
-                raise guards.GuardError(f"account currency is {acct.get('currency')}, the plan used {plan.currency}")
-            for op in plan.ops:
-                self._recheck(plan, op)
-            if dry_run:
-                report.append({"plan_id": plan.id, "dry_run": True, "summary": plan.summary,
-                               "would_apply": [op["label"] for op in plan.ops]})
-                continue
-            results, done = [], []
             try:
-                for op in plan.ops:
-                    out = self._run(plan, op, results)
-                    results.append(out.get("id"))
-                    done.append({"step": op["label"], **out})
-                    audit(self.cfg.safety.log_file, {"plan": plan.id, "account": plan.account_id, "step": op["label"],
-                                                     "op": op["op"], "path": op.get("path"), "result": out})
-            except Exception as exc:
-                audit(self.cfg.safety.log_file, {"plan": plan.id, "account": plan.account_id, "error": str(exc)})
-                report.append({"plan_id": plan.id, "applied": done, "error": str(exc),
-                               "note": "Steps before the error were applied; created objects are DRAFT"})
-                continue
-            self.plans.remove(plan.id)
-            report.append({"plan_id": plan.id, "applied": done, "readback": self._readback(plan, results)})
+                report.append(self._apply_one(plan, dry_run))
+            except Exception as exc:  # report per plan; never lose what earlier plans did
+                report.append({"plan_id": plan.id, "summary": plan.summary, "error": str(exc),
+                               "applied": [], "note": "Nothing in this plan was applied"})
         return {"results": report}
+
+    def _apply_one(self, plan: Plan, dry_run: bool) -> dict:
+        guards.check_account(self.cfg, plan.account_id)
+        acct = self.get_ad_account(plan.account_id)
+        if acct.get("currency") != plan.currency:
+            raise guards.GuardError(f"account currency is {acct.get('currency')}, the plan used {plan.currency}")
+        start = len(plan.progress)  # steps a failed earlier apply already did
+        for op in plan.ops[start:]:
+            self._recheck(plan, op)
+        if dry_run:
+            return {"plan_id": plan.id, "dry_run": True, "summary": plan.summary,
+                    "already_applied": [op["label"] for op in plan.ops[:start]],
+                    "would_apply": [op["label"] for op in plan.ops[start:]]}
+        results, done = list(plan.progress), []
+        for op in plan.ops[start:]:
+            try:
+                out = self._run(plan, op, results)
+            except Exception as exc:
+                audit(self.cfg.safety.log_file, {"plan": plan.id, "account": plan.account_id, "step": op["label"],
+                                                 "error": str(exc)})
+                return {"plan_id": plan.id, "summary": plan.summary, "applied": done, "error": str(exc),
+                        "note": "Steps before the error were applied and kept (new objects are DRAFT). "
+                                "Applying this plan again continues from the failed step."}
+            results.append(out.get("id"))
+            plan.progress = results
+            self.plans.update(plan)
+            done.append({"step": op["label"], **out})
+            audit(self.cfg.safety.log_file, {"plan": plan.id, "account": plan.account_id, "step": op["label"],
+                                             "op": op["op"], "path": op.get("path"), "result": out})
+        self.plans.remove(plan.id)
+        result = {"plan_id": plan.id, "summary": plan.summary, "applied": done}
+        try:
+            result["readback"] = self._readback(plan, results)
+        except Exception as exc:
+            result["readback_error"] = f"applied, but reading it back failed: {exc}"
+        return result
 
     def _readback(self, plan: Plan, results: list) -> list[dict]:
         out = []

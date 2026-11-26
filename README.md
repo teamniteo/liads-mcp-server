@@ -2,11 +2,11 @@
 
 An MCP server for LinkedIn Ads (Campaign Manager). It lets an AI agent read results and build, run and pause small LinkedIn campaigns, with safety rules in the code instead of in the prompt.
 
-**Status:** early. The 38 tests run against a mocked LinkedIn API; the payloads follow LinkedIn's Marketing API docs (version `202610`) but haven't been run against a live ad account yet. Try it first in an ad account without a payment method, where nothing can spend.
+**Status:** early. The tests run against a mocked LinkedIn API; the payloads follow LinkedIn's Marketing API docs (version `202610`) but haven't been run against a live ad account yet. Try it first in an ad account without a payment method, where nothing can spend.
 
 ## How writes work
 
-Every write tool (`draft_*`, `pause_entity`, `enable_entity`) only stores a plan and returns a preview. Nothing changes in LinkedIn until `confirm_and_apply`, which you put on your MCP client's ask list. `confirm_and_apply(dry_run=true)` re-checks every rule and the ad account without writing; LinkedIn has no validate-only mode, so this is the closest thing to one.
+Every write tool (`draft_*`, `pause_entity`, `enable_entity`) only stores a plan and returns a preview. Nothing changes in LinkedIn until `confirm_and_apply`, which you put on your MCP client's ask list. `confirm_and_apply(dry_run=true)` re-checks every rule and the ad account without writing; LinkedIn has no validate-only mode, so this is the closest thing to one. Each plan is reported on its own. If a step fails, the steps before it stay applied (new objects are drafts) and applying the plan again continues from the failed step, so nothing is created twice. A plan ID listed twice is refused.
 
 Whatever the caller asks, the server:
 
@@ -29,7 +29,7 @@ Whatever the caller asks, the server:
 | Draft (stores a plan) | `draft_campaign` (in an existing or a new campaign group), `draft_campaign_update`, `draft_image_ad`, `draft_thought_leader_ad`, `draft_conversion`, `draft_conversion_upload`, `pause_entity`, `enable_entity` |
 | Apply | `confirm_and_apply(plan_ids, dry_run=true)` |
 
-`get_analytics` reports by campaign or ad, and by who clicked: job title, job function, seniority, company size, industry, company, country and region. Conversions there are LinkedIn's count, which includes view-through.
+List tools return `{elements, count, truncated}` and follow LinkedIn's pages up to 1,000 items. `get_analytics` reports by campaign or ad, and by who clicked: job title, job function, seniority, company size, industry, company, country and region. Conversions there are LinkedIn's count, which includes view-through.
 
 ## Setup
 
