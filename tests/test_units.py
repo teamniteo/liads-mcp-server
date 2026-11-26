@@ -47,7 +47,7 @@ def test_resolve_refs():
 def _campaign(**over):
     body = {
         "status": "DRAFT", "audienceExpansionEnabled": False, "offsiteDeliveryEnabled": False, "costType": "CPC",
-        "locale": {"country": "GB", "language": "en"}, "politicalIntent": "NOT_POLITICAL",
+        "locale": {"country": "US", "language": "en"}, "politicalIntent": "NOT_POLITICAL",
         "runSchedule": {"start": 1, "end": 2},
         "dailyBudget": {"amount": "10", "currencyCode": "GBP"},
         "totalBudget": {"amount": "500", "currencyCode": "GBP"},

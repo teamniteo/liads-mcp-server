@@ -24,8 +24,31 @@ GROUP_PATCH_KEYS = {"name", "totalBudget", "runSchedule", "status"}
 CREATIVE_PATCH_KEYS = {"intendedStatus"}
 
 
+# LinkedIn's supported locales, one per language
+# (https://learn.microsoft.com/en-us/linkedin/shared/references/reference-tables/language-codes, read 2026-11-26).
+# LinkedIn turns the campaign locale into an interface-language targeting filter and rejects any other pair.
+SUPPORTED_LOCALES = {
+    "en_US", "ar_AE", "zh_CN", "zh_TW", "cs_CZ", "da_DK", "in_ID", "ms_MY", "nl_NL", "fr_FR", "fi_FI", "de_DE",
+    "it_IT", "ja_JP", "ko_KR", "no_NO", "pl_PL", "pt_BR", "ro_RO", "ru_RU", "es_ES", "sv_SE", "th_TH", "tl_PH", "tr_TR",
+}
+
+
 class GuardError(ValueError):
     pass
+
+
+def check_locale(locale: dict) -> None:
+    """The ad language as LinkedIn names it, e.g. en_US for English. Where the ads show is targeting, not this."""
+    language, country = (locale or {}).get("language", ""), (locale or {}).get("country", "")
+    if not language or not country:
+        raise GuardError("locale country and language are required (no defaults)")
+    code = f"{language}_{country}"
+    if code in SUPPORTED_LOCALES:
+        return
+    same = sorted(c for c in SUPPORTED_LOCALES if c.split("_")[0] == language)
+    hint = f"use {same[0]} (country {same[0].split('_')[1]})" if same else "LinkedIn doesn't support this language"
+    raise GuardError(f"ad language {code} isn't one LinkedIn supports: {hint}. "
+                     "The ad language is separate from where ads show (that's the locations targeting).")
 
 
 def check_account(cfg: Config, account_id: int) -> None:
@@ -102,8 +125,7 @@ def check_campaign(cfg: Config, body: dict, currency: str) -> None:
         raise GuardError("LinkedIn Audience Network (offsite delivery) must be off")
     if body.get("costType") != "CPC":
         raise GuardError("bidding is manual CPC")
-    if not body.get("locale", {}).get("country") or not body.get("locale", {}).get("language"):
-        raise GuardError("locale country and language are required (no defaults)")
+    check_locale(body.get("locale"))
     if not body.get("politicalIntent"):
         raise GuardError("politicalIntent is required")
     _check_schedule(body.get("runSchedule"), need_end=True)

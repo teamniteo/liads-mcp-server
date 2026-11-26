@@ -88,7 +88,7 @@ def test_errors_do_not_leak_token(service, api):
 
 def _live(**over):
     c = {"id": 7001, "name": "c", "status": "DRAFT", "audienceExpansionEnabled": False, "offsiteDeliveryEnabled": False,
-         "costType": "CPC", "locale": {"country": "GB", "language": "en"},
+         "costType": "CPC", "locale": {"country": "US", "language": "en"},
          "dailyBudget": {"amount": "14.80", "currencyCode": "GBP"}, "totalBudget": {"amount": "1350", "currencyCode": "GBP"},
          "unitCost": {"amount": "6", "currencyCode": "GBP"}, "runSchedule": {"start": 1796688000000, "end": 1803945600000}}
     c.update(over)

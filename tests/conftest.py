@@ -64,7 +64,7 @@ CAMPAIGN_ARGS = dict(
     bid=6,
     start="2026-12-08",
     end="2027-02-28",
-    country="GB",
+    country="US",
     language="en",
     include=[
         {"facet": "locations", "values": ["urn:li:geo:101165590"]},

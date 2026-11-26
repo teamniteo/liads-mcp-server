@@ -230,7 +230,7 @@ class Service:
             "group": new_group_name or group_id, "campaign": name, "objective": objective,
             "bidding": f"manual CPC, bid {body['unitCost']['amount']} {cur}",
             "budget": f"{body['dailyBudget']['amount']} {cur}/day, lifetime {body['totalBudget']['amount']} {cur}",
-            "schedule": f"{start} to {end}", "locale": f"{country.upper()}/{language.lower()}",
+            "schedule": f"{start} to {end}", "ad_language": f"{language.lower()}_{country.upper()}",
             "targeting": {"include": include, "exclude": exclude or []},
             "fixed": "status DRAFT, audience expansion off, LinkedIn Audience Network off",
         }

@@ -52,3 +52,18 @@ def test_config_reloads_when_file_changes(tmp_path, monkeypatch, cfg):
     path.write_text(yaml.safe_dump(data))
     os.utime(path, ns=(time.time_ns() + 10**9, time.time_ns() + 10**9))
     assert server.svc().cfg.ads.allowed_accounts == [ACCOUNT, 42]
+
+
+@pytest.mark.parametrize("language, country, message", [
+    ("en", "GB", "use en_US"),
+    ("es", "MX", "use es_ES"),
+    ("sl", "SI", "doesn't support this language"),
+])
+def test_unsupported_ad_language_refused_with_hint(service, language, country, message):
+    with pytest.raises(GuardError, match=message):
+        service.draft_campaign(**{**CAMPAIGN_ARGS, "language": language, "country": country})
+
+
+def test_supported_ad_language_accepted(service):
+    plan = service.draft_campaign(**{**CAMPAIGN_ARGS, "language": "de", "country": "DE"})
+    assert plan["preview"]["ad_language"] == "de_DE"

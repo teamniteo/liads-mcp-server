@@ -14,6 +14,7 @@ Whatever the caller asks, the server:
 - keeps audience expansion and the LinkedIn Audience Network off, bids manual CPC, and requires a daily budget, a lifetime budget and an end date;
 - refuses budgets and bids over the caps in your config, and budgets under LinkedIn's minimums (`min_daily_budget` 10, `min_lifetime_budget` 100 in the account currency); a rise in budget or bid is its own plan;
 - refuses ad accounts that aren't in `ads.allowed_accounts`;
+- accepts only ad languages LinkedIn supports (`en_US` for English, `de_DE`, `es_ES`, `fr_FR`, …); the ad language is separate from where the ads show, which is the locations targeting;
 - builds image ads on hidden posts (`feedDistribution: NONE`), so nothing appears on your company page feed;
 - reads images and conversion CSVs only from `uploads.allowed_dir`;
 - hashes emails (SHA-256) before a conversion upload leaves your machine;
