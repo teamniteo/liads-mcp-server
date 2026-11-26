@@ -37,6 +37,9 @@ class AdsSection(BaseModel):
 
 
 class SafetySection(BaseModel):
+    # LinkedIn's own minimums per campaign: $10 a day, $100 lifetime (in the account currency).
+    min_daily_budget: Decimal = Decimal("10")
+    min_lifetime_budget: Decimal = Decimal("100")
     max_daily_budget: Decimal
     max_lifetime_budget: Decimal
     max_bid: Decimal

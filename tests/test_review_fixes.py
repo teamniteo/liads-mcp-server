@@ -95,7 +95,7 @@ def test_one_sided_budget_change_checked_against_current(service, api):
     api.get(f"{API}/adAccounts/{ACCOUNT}/adCampaigns/7001").respond(
         200, json=_live(dailyBudget={"amount": "10", "currencyCode": "GBP"},
                         totalBudget={"amount": "100", "currencyCode": "GBP"}))
-    with pytest.raises(GuardError, match="larger than the lifetime"):
+    with pytest.raises(GuardError, match="under LinkedIn's minimum"):
         service.draft_campaign_update(ACCOUNT, 7001, lifetime_budget=5)
     service.draft_campaign_update(ACCOUNT, 7001, daily_budget=19)  # 19 <= 100: fine
 

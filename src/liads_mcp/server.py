@@ -4,6 +4,7 @@ confirm_and_apply is the only tool that changes anything in LinkedIn."""
 from __future__ import annotations
 
 import functools
+import os
 from typing import Annotated
 
 import anyio
@@ -31,6 +32,7 @@ mcp = FastMCP(
 )
 
 _service: Service | None = None
+_config_stamp: tuple | None = None
 
 READ = {"readOnlyHint": True, "openWorldHint": True}
 DRAFT = {"readOnlyHint": True, "openWorldHint": True}
@@ -43,9 +45,17 @@ TargetingList = Annotated[
 
 
 def svc() -> Service:
-    global _service
-    if _service is None:
+    """The service, rebuilt when config.yaml changes, so edits apply without a reconnect."""
+    global _service, _config_stamp
+    path = os.environ.get("LIADS_CONFIG", "")
+    try:
+        stat = os.stat(path)
+        stamp = (path, stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        stamp = (path, None, None)
+    if _service is None or stamp != _config_stamp:
         _service = Service(load_config())
+        _config_stamp = stamp
     return _service
 
 

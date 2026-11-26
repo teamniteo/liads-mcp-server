@@ -30,9 +30,29 @@ def _error(resp: httpx.Response) -> LinkedInError:
         message = body.get("message") or message
         code = body.get("serviceErrorCode") or body.get("code")
         code = str(code) if code is not None else None
-    except ValueError:
+        details = _details(body.get("errorDetails"))
+        if details:
+            message = f"{message} Details: {details}"
+    except (ValueError, AttributeError):
         pass
     return LinkedInError(resp.status_code, message, code)
+
+
+def _details(error_details) -> str:
+    """LinkedIn's per-field validation errors, e.g. 'optimizationTargetType: invalid value (INVALID_VALUE)'."""
+    if not isinstance(error_details, dict):
+        return ""
+    parts = []
+    for err in error_details.get("inputErrors") or []:
+        path = ((err.get("input") or {}).get("inputPath") or {}).get("fieldPath", "")
+        desc = err.get("description") or err.get("message") or ""
+        code = err.get("code")
+        parts.append(f"{path}: {desc}".strip(": ") + (f" ({code})" if code else ""))
+    if not parts:
+        import json
+
+        return json.dumps(error_details)[:800]
+    return "; ".join(parts)[:1500]
 
 
 def _allowed_upload_host(url: str) -> bool:

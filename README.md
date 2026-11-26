@@ -12,7 +12,7 @@ Whatever the caller asks, the server:
 
 - creates campaign groups, campaigns and ads as `DRAFT`; switching on is only `enable_entity`, its own plan and its own approval, and the campaign is checked again just before;
 - keeps audience expansion and the LinkedIn Audience Network off, bids manual CPC, and requires a daily budget, a lifetime budget and an end date;
-- refuses budgets and bids over the caps in your config; a rise in budget or bid is its own plan;
+- refuses budgets and bids over the caps in your config, and budgets under LinkedIn's minimums (`min_daily_budget` 10, `min_lifetime_budget` 100 in the account currency); a rise in budget or bid is its own plan;
 - refuses ad accounts that aren't in `ads.allowed_accounts`;
 - builds image ads on hidden posts (`feedDistribution: NONE`), so nothing appears on your company page feed;
 - reads images and conversion CSVs only from `uploads.allowed_dir`;
@@ -72,6 +72,8 @@ List tools return `{elements, count, truncated}` and follow LinkedIn's pages up 
    ```
 
    Allow the read and draft tools, and keep `confirm_and_apply` on the ask list.
+
+Edits to the config file apply on the next tool call, without reconnecting. LinkedIn's validation errors come back with each field and reason.
 
 `health_check` shows when the access and refresh tokens expire and how long the pinned API version is still supported. LinkedIn retires each version about a year after release: bump `api_version` before then.
 

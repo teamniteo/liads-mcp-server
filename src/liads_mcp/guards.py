@@ -66,11 +66,15 @@ def _check_budgets(cfg: Config, daily: dict | None, total: dict | None, currency
         _check_currency(daily, currency, "dailyBudget")
         if d > s.max_daily_budget:
             raise GuardError(f"daily budget {d} is over safety.max_daily_budget {s.max_daily_budget}")
+        if d < s.min_daily_budget:
+            raise GuardError(f"daily budget {d} is under LinkedIn's minimum {s.min_daily_budget} a day")
     if total is not None:
         t = amount(total, "totalBudget")
         _check_currency(total, currency, "totalBudget")
         if t > s.max_lifetime_budget:
             raise GuardError(f"lifetime budget {t} is over safety.max_lifetime_budget {s.max_lifetime_budget}")
+        if t < s.min_lifetime_budget:
+            raise GuardError(f"lifetime budget {t} is under LinkedIn's minimum {s.min_lifetime_budget}")
         if daily is not None and amount(daily, "dailyBudget") > t:
             raise GuardError("daily budget is larger than the lifetime budget")
 
