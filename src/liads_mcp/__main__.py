@@ -1,4 +1,4 @@
-"""`linkedin-ads-mcp` runs the MCP server on stdio; `linkedin-ads-mcp login` signs in to LinkedIn."""
+"""`liads-mcp-server` runs the MCP server on stdio; `liads-mcp-server login` signs in to LinkedIn."""
 
 from __future__ import annotations
 

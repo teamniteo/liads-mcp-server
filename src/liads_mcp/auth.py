@@ -1,6 +1,6 @@
 """OAuth 2.0 (3-legged) for LinkedIn, and the local token file.
 
-`linkedin-ads-mcp login` opens LinkedIn's consent page, receives the code on
+`liads-mcp-server login` opens LinkedIn's consent page, receives the code on
 http://localhost:<redirect_port>/callback, checks the state value and stores
 the tokens in a 0600 file. The server refreshes the access token with the
 refresh token when it is about to expire.
@@ -86,7 +86,7 @@ class TokenStore:
 
     def load(self) -> dict:
         if not self.path.exists():
-            raise AuthError("No token yet: run `linkedin-ads-mcp login`")
+            raise AuthError("No token yet: run `liads-mcp-server login`")
         return json.loads(self.path.read_text(encoding="utf-8"))
 
     def access_token(self) -> str:
@@ -98,9 +98,9 @@ class TokenStore:
     def refresh(self, record: dict | None = None) -> dict:
         record = record or self.load()
         if not record.get("refresh_token"):
-            raise AuthError("Access token expired and no refresh token: run `linkedin-ads-mcp login`")
+            raise AuthError("Access token expired and no refresh token: run `liads-mcp-server login`")
         if record.get("refresh_token_expires_at") and record["refresh_token_expires_at"] < time.time():
-            raise AuthError("Refresh token expired: run `linkedin-ads-mcp login`")
+            raise AuthError("Refresh token expired: run `liads-mcp-server login`")
         client_id, client_secret = _client_credentials(self.cfg)
         resp = _exchange(
             {

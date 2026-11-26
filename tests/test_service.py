@@ -6,8 +6,8 @@ from urllib.parse import unquote
 import httpx
 import pytest
 
-from linkedin_ads_mcp.client import LinkedInError
-from linkedin_ads_mcp.guards import GuardError
+from liads_mcp.client import LinkedInError
+from liads_mcp.guards import GuardError
 
 from .conftest import ACCOUNT, API, CAMPAIGN_ARGS, TOKEN, writes
 
@@ -72,7 +72,7 @@ def test_post_is_never_retried(service, api):
 
 
 def test_get_is_retried(service, api, monkeypatch):
-    monkeypatch.setattr("linkedin_ads_mcp.client.time.sleep", lambda s: None)
+    monkeypatch.setattr("liads_mcp.client.time.sleep", lambda s: None)
     route = api.get(f"{API}/adAccounts/{ACCOUNT}/adCampaignGroups")
     route.side_effect = [httpx.Response(503), httpx.Response(200, json={"elements": [{"id": 1}]})]
     assert service.list_campaign_groups(ACCOUNT) == [{"id": 1}]

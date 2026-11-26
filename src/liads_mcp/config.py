@@ -1,4 +1,4 @@
-"""Configuration, read from the YAML file named by LINKEDIN_ADS_CONFIG."""
+"""Configuration, read from the YAML file named by LIADS_CONFIG."""
 
 from __future__ import annotations
 
@@ -62,9 +62,9 @@ class Config(BaseModel):
 
 
 def load_config(path: str | os.PathLike | None = None) -> Config:
-    path = path or os.environ.get("LINKEDIN_ADS_CONFIG")
+    path = path or os.environ.get("LIADS_CONFIG")
     if not path:
-        raise RuntimeError("Set LINKEDIN_ADS_CONFIG to the path of config.yaml")
+        raise RuntimeError("Set LIADS_CONFIG to the path of config.yaml")
     with open(path, encoding="utf-8") as fh:
         data = yaml.safe_load(fh) or {}
     return Config.model_validate(data)

@@ -4,8 +4,8 @@ import time
 import pytest
 import respx
 
-from linkedin_ads_mcp.config import Config
-from linkedin_ads_mcp.service import Service
+from liads_mcp.config import Config
+from liads_mcp.service import Service
 
 API = "https://api.linkedin.com/rest"
 ACCOUNT = 512345678

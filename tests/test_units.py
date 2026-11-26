@@ -4,10 +4,10 @@ from decimal import Decimal
 
 import pytest
 
-from linkedin_ads_mcp import guards, restli
-from linkedin_ads_mcp.plans import resolve_refs
-from linkedin_ads_mcp.service import targeting
-from linkedin_ads_mcp.versions import version_status
+from liads_mcp import guards, restli
+from liads_mcp.plans import resolve_refs
+from liads_mcp.service import targeting
+from liads_mcp.versions import version_status
 
 
 def test_restli_encodes_urns_and_structures():
